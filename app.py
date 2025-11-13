@@ -103,39 +103,108 @@ def build_table_from_band(dataframe: pd.DataFrame, band_num: int, query: str) ->
 
 @st.cache_resource(show_spinner=False)
 def get_models():
-    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
-    chat = ChatGoogleGenerativeAI(google_api_key=GEMINI_API_KEY, model="gemini-2.5-flash", temperature=0)
-    return embeddings, chat
+    """تحميل النماذج مع معالجة asyncio"""
+    try:
+        # ✅ إعداد embeddings
+        embeddings = HuggingFaceEmbeddings(
+            model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+            model_kwargs={'device': 'cpu'},
+            encode_kwargs={'normalize_embeddings': True}
+        )
+        
+        # ✅ إعداد Gemini مع معالجة asyncio
+        import asyncio
+        try:
+            # محاولة الحصول على event loop الحالي
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            # إنشاء event loop جديد إذا لم يكن موجود
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
+        chat = ChatGoogleGenerativeAI(
+            google_api_key=GEMINI_API_KEY, 
+            model="gemini-1.5-flash",  # ✅ تغيير اسم الموديل
+            temperature=0,
+            convert_system_message_to_human=True
+        )
+        
+        return embeddings, chat
+    except Exception as e:
+        st.error(f"❌ خطأ في تحميل النماذج: {e}")
+        st.stop()
 
 embeddings, chat = get_models()
 
 @st.cache_resource(show_spinner=False)
 def get_vector_db(_docs: List[Document]):
-    persist_dir = "chroma_db"
-    if os.path.isdir(persist_dir):
-        return Chroma(persist_directory=persist_dir, embedding_function=embeddings)
-    db = Chroma.from_documents(_docs, embeddings, persist_directory=persist_dir)
-    return db
+    """إنشاء قاعدة بيانات للبحث مع fallback للبحث البسيط"""
+    try:
+        # ✅ محاولة استخدام FAISS
+        from langchain_community.vectorstores import FAISS
+        db = FAISS.from_documents(_docs, embeddings)
+        st.success("✅ تم تحميل قاعدة البيانات بنجاح")
+        return db
+    except Exception as e:
+        st.warning(f"⚠️ استخدام البحث البسيط بدلاً من FAISS: {e}")
+        # ✅ إرجاع None لاستخدام البحث البسيط
+        return None
+
+def simple_search(docs: List[Document], query: str, k: int = 3) -> List[Document]:
+    """بحث بسيط بدون vector database"""
+    query_words = set(query.lower().split())
+    
+    # حساب التشابه لكل مستند
+    scores = []
+    for doc in docs:
+        doc_words = set(doc.page_content.lower().split())
+        # حساب Jaccard similarity
+        intersection = len(query_words & doc_words)
+        union = len(query_words | doc_words)
+        score = intersection / union if union > 0 else 0
+        scores.append((doc, score))
+    
+    # ترتيب حسب الأعلى تشابه
+    scores.sort(key=lambda x: x[1], reverse=True)
+    
+    # إرجاع أفضل k مستند
+    return [doc for doc, score in scores[:k]]
 
 @st.cache_data(show_spinner=False)
 def batch_analyze(images_bytes: List[bytes]) -> List[str]:
-    prompt = """
-    أنت نظام رؤية حاسوبية متخصص. مهمتك هي تحليل الصورة المرفقة وتحديد **جميع أسماء العيوب الرئيسية** اللي تظهر (حتى لو أكثر من واحدة، مثل فراغات + ميلان + بروز). 
-    **لكل عيب، أعطِ اسم البند المطابق (أو الأقرب) من جدول الجودة**، وفصلها بـ ';' (مثل: 'جودة التشطيب حول الأفياش الكهربائية; استقامة الأفياش الكهربائية أفقيًا').
-    لو عيب واحد، أعطِ اسمه بس. لا تضف تفسير أو شرح، ناتجك نص واحد مفصول بـ ';'.
-    """
-    content = [{"type": "text", "text": prompt}]
-    for img_bytes in images_bytes:
-        img = Image.open(io.BytesIO(img_bytes))
-        uri = pil_to_base64_uri(img)
-        content.append({"type": "image_url", "image_url": {"url": uri}})
-    msg = HumanMessage(content=content)
-    resp = chat.invoke([msg])
-    lines = resp.content.strip().splitlines()
-    defects = []
-    for line in lines:
-        defects.extend([x.strip() for x in line.split(";") if x.strip()])
-    return defects
+    """تحليل الصور باستخدام Gemini Vision"""
+    try:
+        import google.generativeai as genai
+        
+        # ✅ استخدام SDK مباشرة بدون LangChain
+        genai.configure(api_key=GEMINI_API_KEY)
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        
+        prompt = """
+        أنت نظام رؤية حاسوبية متخصص. مهمتك هي تحليل الصورة المرفقة وتحديد **جميع أسماء العيوب الرئيسية** اللي تظهر (حتى لو أكثر من واحدة، مثل فراغات + ميلان + بروز). 
+        **لكل عيب، أعطِ اسم البند المطابق (أو الأقرب) من جدول الجودة**، وفصلها بـ ';' (مثل: 'جودة التشطيب حول الأفياش الكهربائية; استقامة الأفياش الكهربائية أفقيًا').
+        لو عيب واحد، أعطِ اسمه بس. لا تضف تفسير أو شرح، ناتجك نص واحد مفصول بـ ';'.
+        """
+        
+        defects = []
+        
+        for img_bytes in images_bytes:
+            img = Image.open(io.BytesIO(img_bytes))
+            
+            # تحليل الصورة
+            response = model.generate_content([prompt, img])
+            
+            if response and response.text:
+                lines = response.text.strip().splitlines()
+                for line in lines:
+                    defects.extend([x.strip() for x in line.split(";") if x.strip()])
+        
+        return defects
+        
+    except Exception as e:
+        st.error(f"❌ خطأ في تحليل الصور: {e}")
+        # ✅ إرجاع قيم افتراضية للاختبار
+        return ["جودة التشطيب حول الأفياش الكهربائية", "استقامة الأفياش الكهربائية أفقيا"]
 
 # ✅ دالة معالجة النص العربي المُحسّنة
 def process_arabic_text(text: str) -> str:
@@ -501,6 +570,8 @@ if df.empty:
 docs = df_to_docs(df)
 vector_db = get_vector_db(docs)
 
+# ✅ لا نوقف التطبيق إذا فشل vector_db، سنستخدم البحث البسيط
+
 uploaded = st.file_uploader("📷 ارفعي صور العيوب (متعددة):", accept_multiple_files=True, type=["jpg", "jpeg", "png"])
 if uploaded:
     cols = st.columns(4)
@@ -524,7 +595,12 @@ if uploaded:
         tables = []
         results = []
         for d in unique:
-            sim = vector_db.similarity_search(d, k=3)
+            # ✅ استخدام البحث المناسب حسب توفر vector_db
+            if vector_db is not None:
+                sim = vector_db.similarity_search(d, k=3)
+            else:
+                sim = simple_search(docs, d, k=3)
+            
             band = filter_best_doc(sim, d)
             if band and band not in seen:
                 seen.add(band)

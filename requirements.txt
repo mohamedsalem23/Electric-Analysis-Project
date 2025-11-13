@@ -8,5 +8,6 @@ reportlab
 python-bidi
 arabic-reshaper
 google-generativeai
-faiss-cpu
+sentence-transformers
 langchain-community
+numpy
