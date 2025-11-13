@@ -2,13 +2,8 @@
 import os, streamlit as st, pandas as pd, re, io, base64
 from typing import List
 from PIL import Image
-from langchain_core.documents import Document
-from langchain_core.messages import HumanMessage
-from langchain import PromptTemplate
-from langchain.chains.question_answering import load_qa_chain
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_community.vectorstores import FAISS
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from sentence_transformers import SentenceTransformer
+import numpy as np
 
 # ✅ إضافات PDF
 from reportlab.lib.pagesizes import A4
@@ -103,7 +98,7 @@ def build_table_from_band(dataframe: pd.DataFrame, band_num: int, query: str) ->
 
 @st.cache_resource(show_spinner=False)
 def get_models():
-    """تحميل النماذج مع معالجة asyncio"""
+    """تحميل النماذج - Embeddings فقط"""
     try:
         # ✅ إعداد embeddings
         embeddings = HuggingFaceEmbeddings(
@@ -112,29 +107,13 @@ def get_models():
             encode_kwargs={'normalize_embeddings': True}
         )
         
-        # ✅ إعداد Gemini مع معالجة asyncio
-        import asyncio
-        try:
-            # محاولة الحصول على event loop الحالي
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            # إنشاء event loop جديد إذا لم يكن موجود
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        
-        chat = ChatGoogleGenerativeAI(
-            google_api_key=GEMINI_API_KEY, 
-            model="gemini-1.5-flash",  # ✅ تغيير اسم الموديل
-            temperature=0,
-            convert_system_message_to_human=True
-        )
-        
-        return embeddings, chat
+        # ✅ لن نستخدم ChatGoogleGenerativeAI، سنستخدم SDK مباشرة
+        return embeddings, None
     except Exception as e:
         st.error(f"❌ خطأ في تحميل النماذج: {e}")
         st.stop()
 
-embeddings, chat = get_models()
+embeddings, _ = get_models()  # نتجاهل chat
 
 @st.cache_resource(show_spinner=False)
 def get_vector_db(_docs: List[Document]):
@@ -610,23 +589,34 @@ if uploaded:
         bar.progress(60)
 
         combined_queries = '; '.join([r['query'] for r in results])
-        qna_template = """
-أنت خبير في العيوب الكهربائية. قدم **ملخص عام قصير** للعيوب، مع **أولوية لكل بند** (قصوى: مخاطر سلامة، متوسطة: أداء/تشطيب، عادية: جمالي). **قسّم الملخص إلى جمل واضحة ومستقلة، كل جملة في سطر جديد** لوصف عيب واحد فقط، ولا تضع ترقيم أو بوليت.
+        
+        # ✅ استخدام Gemini SDK مباشرة للملخص
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=GEMINI_API_KEY)
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            
+            qna_prompt = f"""
+أنت خبير في العيوب الكهربائية. قدم **ملخص عام قصير** للعيوب التالية، مع **أولوية لكل بند** (قصوى: مخاطر سلامة، متوسطة: أداء/تشطيب، عادية: جمالي). 
 
-### السياق:
-{context}
+**قسّم الملخص إلى جمل واضحة ومستقلة، كل جملة في سطر جديد** لوصف عيب واحد فقط، ولا تضع ترقيم أو بوليت.
 
-### السؤال:
-{question}
+### العيوب المكتشفة:
+{combined_queries}
+
+### السياق من قاعدة البيانات:
+{chr(10).join([doc.page_content for doc in context_docs[:3]])}
 
 ### الملخص:
 """
-        qna_prompt = PromptTemplate(template=qna_template, input_variables=["context", "question"])
-        stuff_chain = load_qa_chain(chat, chain_type="stuff", prompt=qna_prompt)
-
-        context_docs = [r['doc'] for r in results]
-        answer = stuff_chain({"input_documents": context_docs, "question": combined_queries}, return_only_outputs=True)
-        summary = answer["output_text"]
+            
+            response = model.generate_content(qna_prompt)
+            summary = response.text if response and response.text else "تم اكتشاف عيوب كهربائية تحتاج إلى معالجة."
+            
+        except Exception as e:
+            st.warning(f"⚠️ خطأ في توليد الملخص: {e}")
+            summary = f"تم اكتشاف العيوب التالية: {combined_queries}"
+        
         bar.progress(90)
 
         st.subheader("📋 الملخص العام والأولويات")

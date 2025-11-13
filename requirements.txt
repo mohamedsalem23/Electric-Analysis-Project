@@ -2,12 +2,10 @@ streamlit
 pandas
 openpyxl
 Pillow
-langchain==0.1.20
-langchain-google-genai
 reportlab
 python-bidi
 arabic-reshaper
 google-generativeai
 sentence-transformers
-langchain-community
 numpy
+scikit-learn
