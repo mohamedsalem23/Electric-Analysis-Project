@@ -66,20 +66,27 @@ def load_excel() -> pd.DataFrame:
         return pd.DataFrame()
 
 @st.cache_data(show_spinner=False)
-def df_to_docs(df: pd.DataFrame) -> List[Document]:
-    return [Document(page_content=f"اسم البند: {r['اسم البند']}. المتطلب: {r['المتطلب']}.", metadata=r.to_dict())
-            for _, r in df.iterrows()]
+def df_to_docs(df: pd.DataFrame) -> List[dict]:
+    """تحويل DataFrame إلى قائمة من المستندات"""
+    return [
+        {
+            'content': f"اسم البند: {r['اسم البند']}. المتطلب: {r['المتطلب']}.",
+            'metadata': r.to_dict()
+        }
+        for _, r in df.iterrows()
+    ]
 
-def filter_best_doc(similar_docs: List[Document], query: str) -> int:
+def filter_best_doc(similar_docs: List[dict], query: str) -> int:
+    """اختيار أفضل مستند بناءً على التشابه"""
     best_doc = None
     best_score = 0.0
     for doc in similar_docs:
-        name = doc.metadata.get('اسم البند', '')
+        name = doc['metadata'].get('اسم البند', '')
         match_score = len(set(re.findall(r'\w+', query.lower())) & set(re.findall(r'\w+', name.lower()))) / max(len(set(re.findall(r'\w+', query.lower()))), 1)
         if match_score > best_score:
             best_score = match_score
             best_doc = doc
-    return int(best_doc.metadata.get('رقم البند', 0)) if best_doc else int(similar_docs[0].metadata.get('رقم البند', 0))
+    return int(best_doc['metadata'].get('رقم البند', 0)) if best_doc else int(similar_docs[0]['metadata'].get('رقم البند', 0))
 
 def build_table_from_band(dataframe: pd.DataFrame, band_num: int, query: str) -> str:
     band_rows = dataframe[dataframe['رقم البند'] == band_num].copy()
@@ -98,55 +105,70 @@ def build_table_from_band(dataframe: pd.DataFrame, band_num: int, query: str) ->
 
 @st.cache_resource(show_spinner=False)
 def get_models():
-    """تحميل النماذج - Embeddings فقط"""
+    """تحميل نموذج Embeddings"""
     try:
-        # ✅ إعداد embeddings
-        embeddings = HuggingFaceEmbeddings(
-            model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
-            model_kwargs={'device': 'cpu'},
-            encode_kwargs={'normalize_embeddings': True}
-        )
-        
-        # ✅ لن نستخدم ChatGoogleGenerativeAI، سنستخدم SDK مباشرة
-        return embeddings, None
+        model = SentenceTransformer('sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2')
+        st.success("✅ تم تحميل نموذج Embeddings")
+        return model
     except Exception as e:
-        st.error(f"❌ خطأ في تحميل النماذج: {e}")
-        st.stop()
-
-embeddings, _ = get_models()  # نتجاهل chat
-
-@st.cache_resource(show_spinner=False)
-def get_vector_db(_docs: List[Document]):
-    """إنشاء قاعدة بيانات للبحث مع fallback للبحث البسيط"""
-    try:
-        # ✅ محاولة استخدام FAISS
-        from langchain_community.vectorstores import FAISS
-        db = FAISS.from_documents(_docs, embeddings)
-        st.success("✅ تم تحميل قاعدة البيانات بنجاح")
-        return db
-    except Exception as e:
-        st.warning(f"⚠️ استخدام البحث البسيط بدلاً من FAISS: {e}")
-        # ✅ إرجاع None لاستخدام البحث البسيط
+        st.error(f"❌ خطأ في تحميل النموذج: {e}")
         return None
 
-def simple_search(docs: List[Document], query: str, k: int = 3) -> List[Document]:
-    """بحث بسيط بدون vector database"""
+embedding_model = get_models()
+
+@st.cache_resource(show_spinner=False)
+def get_vector_db(_docs: List[dict], _model):
+    """إنشاء قاعدة بيانات embeddings بسيطة"""
+    try:
+        if _model is None:
+            return None, None
+            
+        # ✅ حساب embeddings لجميع المستندات
+        texts = [doc['content'] for doc in _docs]
+        embeddings = _model.encode(texts, show_progress_bar=False)
+        
+        st.success("✅ تم إنشاء قاعدة البيانات")
+        return embeddings, texts
+    except Exception as e:
+        st.warning(f"⚠️ استخدام البحث البسيط: {e}")
+        return None, None
+
+def cosine_similarity(a, b):
+    """حساب التشابه بين متجهين"""
+    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+
+def search_similar(query: str, docs: List[dict], embeddings_matrix, texts, model, k: int = 3) -> List[dict]:
+    """البحث عن أقرب المستندات"""
+    try:
+        if embeddings_matrix is None or model is None:
+            return simple_search(docs, query, k)
+        
+        # تشفير الاستعلام
+        query_embedding = model.encode([query], show_progress_bar=False)[0]
+        
+        # حساب التشابه
+        similarities = [cosine_similarity(query_embedding, emb) for emb in embeddings_matrix]
+        
+        # الحصول على أفضل k نتيجة
+        top_indices = np.argsort(similarities)[-k:][::-1]
+        
+        return [docs[i] for i in top_indices]
+    except:
+        return simple_search(docs, query, k)
+
+def simple_search(docs: List[dict], query: str, k: int = 3) -> List[dict]:
+    """بحث بسيط بدون embeddings"""
     query_words = set(query.lower().split())
     
-    # حساب التشابه لكل مستند
     scores = []
     for doc in docs:
-        doc_words = set(doc.page_content.lower().split())
-        # حساب Jaccard similarity
+        doc_words = set(doc['content'].lower().split())
         intersection = len(query_words & doc_words)
         union = len(query_words | doc_words)
         score = intersection / union if union > 0 else 0
         scores.append((doc, score))
     
-    # ترتيب حسب الأعلى تشابه
     scores.sort(key=lambda x: x[1], reverse=True)
-    
-    # إرجاع أفضل k مستند
     return [doc for doc, score in scores[:k]]
 
 @st.cache_data(show_spinner=False)
@@ -547,9 +569,7 @@ if df.empty:
     st.stop()
 
 docs = df_to_docs(df)
-vector_db = get_vector_db(docs)
-
-# ✅ لا نوقف التطبيق إذا فشل vector_db، سنستخدم البحث البسيط
+embeddings_matrix, texts = get_vector_db(docs, embedding_model)
 
 uploaded = st.file_uploader("📷 ارفعي صور العيوب (متعددة):", accept_multiple_files=True, type=["jpg", "jpeg", "png"])
 if uploaded:
@@ -574,12 +594,8 @@ if uploaded:
         tables = []
         results = []
         for d in unique:
-            # ✅ استخدام البحث المناسب حسب توفر vector_db
-            if vector_db is not None:
-                sim = vector_db.similarity_search(d, k=3)
-            else:
-                sim = simple_search(docs, d, k=3)
-            
+            # ✅ البحث عن مستندات مشابهة
+            sim = search_similar(d, docs, embeddings_matrix, texts, embedding_model, k=3)
             band = filter_best_doc(sim, d)
             if band and band not in seen:
                 seen.add(band)
@@ -605,7 +621,7 @@ if uploaded:
 {combined_queries}
 
 ### السياق من قاعدة البيانات:
-{chr(10).join([doc.page_content for doc in context_docs[:3]])}
+{chr(10).join([doc['content'] for doc in context_docs[:3]])}
 
 ### الملخص:
 """
