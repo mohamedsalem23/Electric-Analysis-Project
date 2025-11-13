@@ -21,6 +21,9 @@ from bidi import algorithm as bidi_algorithm
 from arabic_reshaper import reshape 
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+# ✅ إجبار استخدام REST بدلاً من gRPC
+os.environ["GOOGLE_API_USE_CLIENT_CERTIFICATE"] = "false"
+os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
 
 # ✅ قراءة API Key من Streamlit Secrets
 try:
@@ -179,7 +182,7 @@ def batch_analyze(images_bytes: List[bytes]) -> List[str]:
         
         # ✅ استخدام SDK مباشرة بدون LangChain
         genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-2.5-flash')
         
         prompt = """
         أنت نظام رؤية حاسوبية متخصص. مهمتك هي تحليل الصورة المرفقة وتحديد **جميع أسماء العيوب الرئيسية** اللي تظهر (حتى لو أكثر من واحدة، مثل فراغات + ميلان + بروز). 

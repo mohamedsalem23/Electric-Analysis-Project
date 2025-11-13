@@ -5,7 +5,6 @@ Pillow
 reportlab
 python-bidi
 arabic-reshaper
-google-generativeai
 sentence-transformers
 numpy
-scikit-learn
+requests
