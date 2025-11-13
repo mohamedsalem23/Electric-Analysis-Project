@@ -1,14 +1,14 @@
 # ====== 1. إعدادات سريعة ======
-import os, streamlit as st, nltk, pandas as pd, re, io, base64
+import os, streamlit as st, pandas as pd, re, io, base64
 from typing import List
 from PIL import Image
-from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage
 from langchain import PromptTemplate
 from langchain.chains.question_answering import load_qa_chain
-from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_community.vectorstores import FAISS
+from langchain_community.embeddings import HuggingFaceEmbeddings
 
 # ✅ إضافات PDF
 from reportlab.lib.pagesizes import A4

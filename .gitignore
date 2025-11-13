@@ -32,9 +32,10 @@ venv.bak/
 .streamlit/secrets.toml
 
 # Database
-chroma_db/
 *.db
 *.sqlite
+*.faiss
+*.pkl
 
 # IDE
 .vscode/

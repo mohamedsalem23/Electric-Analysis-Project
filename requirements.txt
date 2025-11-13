@@ -2,13 +2,11 @@ streamlit
 pandas
 openpyxl
 Pillow
-langchain
-langchain-chroma
-langchain-huggingface
+langchain==0.1.20
 langchain-google-genai
-sentence-transformers
-nltk
 reportlab
 python-bidi
 arabic-reshaper
-chromadb
+google-generativeai
+faiss-cpu
+langchain-community
