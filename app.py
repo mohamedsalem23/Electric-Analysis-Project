@@ -137,7 +137,7 @@ def build_table_from_band(dataframe: pd.DataFrame, band_num: int, query: str) ->
 def get_models():
     """تحميل نموذج Embeddings"""
     try:
-        model = SentenceTransformer('sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2')
+        model = SentenceTransformer('intfloat/multilingual-e5-large')
         st.success("✅ تم تحميل نموذج Embeddings")
         return model
     except Exception as e:
