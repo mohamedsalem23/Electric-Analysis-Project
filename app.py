@@ -260,13 +260,41 @@ def batch_analyze(images_bytes: List[bytes]) -> List[str]:
         # قيم افتراضية للاختبار
         return ["جودة التشطيب حول الأفياش الكهربائية", "استقامة الأفياش الكهربائية أفقيا"]
 
+def clean_text_for_pdf(text: str) -> str:
+    """تنظيف النص من HTML tags والرموز الخاصة"""
+    if not text or text == "nan" or pd.isna(text):
+        return "—"
+    
+    text = str(text).strip()
+    
+    # ✅ إزالة HTML tags
+    text = re.sub(r'<br\s*/?>', '\n', text)  # تحويل <br/> لـ newline
+    text = re.sub(r'<[^>]+>', '', text)  # إزالة أي tags أخرى
+    
+    # ✅ تنظيف رموز خاصة
+    text = text.replace('&nbsp;', ' ')
+    text = text.replace('&lt;', '<')
+    text = text.replace('&gt;', '>')
+    text = text.replace('&amp;', '&')
+    
+    # ✅ تنظيف مسافات زائدة
+    text = re.sub(r'\n\s*\n', '\n', text)
+    text = re.sub(r'[ \t]+', ' ', text)
+    
+    return text.strip()
+
 # ✅ دالة معالجة النص العربي المُحسّنة
 def process_arabic_text(text: str) -> str:
     """معالجة النص العربي بشكل صحيح مع دعم RTL"""
-    if not text or text == "nan" or pd.isna(text):
+    # تنظيف أولاً
+    text = clean_text_for_pdf(text)
+    
+    if not text or text == "—":
         return "—"
-    text = str(text).strip()
+    
+    # إعادة تشكيل الأحرف العربية
     reshaped = reshape(text)
+    # تطبيق خوارزمية BiDi
     bidi_text = bidi_algorithm.get_display(reshaped)
     return bidi_text
 
@@ -285,9 +313,9 @@ def clean_markdown_text(text: str) -> str:
 def register_fonts():
     """تسجيل خطوط Tahoma من مجلد fonts"""
     try:
-        fonts_dir = os.path.join(os.path.dirname(__file__),"fonts")
-        tahoma_path = os.path.join(fonts_dir, "tahoma.ttf")
-        tahoma_bold_path = os.path.join(fonts_dir, "tahomabd.ttf")
+        fonts_dir = os.path.join(os.path.dirname(__file__), "fonts")
+        tahoma_path = os.path.join(fonts_dir, "Tahoma.ttf")
+        tahoma_bold_path = os.path.join(fonts_dir, "Tahomabd.ttf")
         
         if os.path.exists(tahoma_path):
             pdfmetrics.registerFont(TTFont("Tahoma", tahoma_path))
@@ -665,9 +693,7 @@ if uploaded:
             
             API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
             
-            # جهّز مستندات السياق من نتائج البحث، وإذا كانت النتائج فارغة فاخذ أول 3 مستندات من قاعدة البيانات العامة
-            context_docs = [r['doc'] for r in results] if results else docs[:3]
-            context_text = "\n".join([doc.get('content', '') for doc in context_docs[:3]])
+            context_text = "\n".join([doc['content'] for doc in context_docs[:3]])
             
             qna_prompt = f"""
 أنت خبير في العيوب الكهربائية. قدم **ملخص عام قصير** للعيوب التالية، مع **أولوية لكل بند** (قصوى: مخاطر سلامة، متوسطة: أداء/تشطيب، عادية: جمالي). 
