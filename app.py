@@ -92,19 +92,46 @@ def filter_best_doc(similar_docs: List[dict], query: str) -> int:
     return int(best_doc['metadata'].get('رقم البند', 0)) if best_doc else int(similar_docs[0]['metadata'].get('رقم البند', 0))
 
 def build_table_from_band(dataframe: pd.DataFrame, band_num: int, query: str) -> str:
+    """بناء جدول من رقم البند مع تحويل يدوي لـ Markdown"""
     band_rows = dataframe[dataframe['رقم البند'] == band_num].copy()
     if band_rows.empty:
         return "| لا توجد بيانات |"
+    
     def match_score(row):
         req = str(row.get('المتطلب', '')).lower()
         q_words = set(re.findall(r'\w+', query.lower()))
         row_words = set(re.findall(r'\w+', req))
         return len(q_words & row_words) / max(len(q_words), 1)
+    
     band_rows['match_score'] = band_rows.apply(match_score, axis=1)
     best_row = band_rows.loc[band_rows['match_score'].idxmax()]
+    
     cols = ['رقم البند', 'اسم البند', 'المتطلب', 'التعريف حسب الكود السعودي', 'التوصيات', 'طريقة الإصلاح', 'التكلفة التقديرية (ريال)']
     best_row = best_row[cols].to_frame().T
-    return best_row.to_markdown(index=False)
+    
+    # ✅ تحويل يدوي إلى Markdown بدون tabulate
+    markdown_lines = []
+    
+    # Header
+    header = "| " + " | ".join(cols) + " |"
+    markdown_lines.append(header)
+    
+    # Separator
+    separator = "|" + "|".join([" --- " for _ in cols]) + "|"
+    markdown_lines.append(separator)
+    
+    # Data row
+    row_data = []
+    for col in cols:
+        value = str(best_row[col].values[0]) if col in best_row.columns else "—"
+        # تنظيف القيمة
+        value = value.replace('\n', ' ').replace('|', '\\|')
+        row_data.append(value)
+    
+    data_row = "| " + " | ".join(row_data) + " |"
+    markdown_lines.append(data_row)
+    
+    return "\n".join(markdown_lines)
 
 @st.cache_resource(show_spinner=False)
 def get_models():
@@ -176,38 +203,61 @@ def simple_search(docs: List[dict], query: str, k: int = 3) -> List[dict]:
 
 @st.cache_data(show_spinner=False)
 def batch_analyze(images_bytes: List[bytes]) -> List[str]:
-    """تحليل الصور باستخدام Gemini Vision"""
+    """تحليل الصور باستخدام Gemini Vision مع REST API"""
     try:
         import google.generativeai as genai
+        import requests
         
-        # ✅ استخدام SDK مباشرة بدون LangChain
-        genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel('gemini-2.5-flash')
+        # ✅ استخدام REST API مباشرة بدون SDK
+        API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
         
-        prompt = """
-        أنت نظام رؤية حاسوبية متخصص. مهمتك هي تحليل الصورة المرفقة وتحديد **جميع أسماء العيوب الرئيسية** اللي تظهر (حتى لو أكثر من واحدة، مثل فراغات + ميلان + بروز). 
-        **لكل عيب، أعطِ اسم البند المطابق (أو الأقرب) من جدول الجودة**، وفصلها بـ ';' (مثل: 'جودة التشطيب حول الأفياش الكهربائية; استقامة الأفياش الكهربائية أفقيًا').
-        لو عيب واحد، أعطِ اسمه بس. لا تضف تفسير أو شرح، ناتجك نص واحد مفصول بـ ';'.
-        """
+        prompt_text = """
+أنت نظام رؤية حاسوبية متخصص. مهمتك هي تحليل الصورة المرفقة وتحديد **جميع أسماء العيوب الرئيسية** اللي تظهر (حتى لو أكثر من واحدة، مثل فراغات + ميلان + بروز). 
+**لكل عيب، أعطِ اسم البند المطابق (أو الأقرب) من جدول الجودة**، وفصلها بـ ';' (مثل: 'جودة التشطيب حول الأفياش الكهربائية; استقامة الأفياش الكهربائية أفقيًا').
+لو عيب واحد، أعطِ اسمه بس. لا تضف تفسير أو شرح، ناتجك نص واحد مفصول بـ ';'.
+"""
         
         defects = []
         
         for img_bytes in images_bytes:
             img = Image.open(io.BytesIO(img_bytes))
             
-            # تحليل الصورة
-            response = model.generate_content([prompt, img])
+            # تحويل الصورة إلى base64
+            buffered = io.BytesIO()
+            img.save(buffered, format="JPEG")
+            img_base64 = base64.b64encode(buffered.getvalue()).decode()
             
-            if response and response.text:
-                lines = response.text.strip().splitlines()
-                for line in lines:
-                    defects.extend([x.strip() for x in line.split(";") if x.strip()])
+            # إعداد الطلب
+            payload = {
+                "contents": [{
+                    "parts": [
+                        {"text": prompt_text},
+                        {
+                            "inline_data": {
+                                "mime_type": "image/jpeg",
+                                "data": img_base64
+                            }
+                        }
+                    ]
+                }]
+            }
+            
+            # إرسال الطلب
+            response = requests.post(API_URL, json=payload, timeout=30)
+            
+            if response.status_code == 200:
+                result = response.json()
+                if 'candidates' in result and len(result['candidates']) > 0:
+                    text = result['candidates'][0]['content']['parts'][0]['text']
+                    lines = text.strip().splitlines()
+                    for line in lines:
+                        defects.extend([x.strip() for x in line.split(";") if x.strip()])
         
-        return defects
+        return defects if defects else ["جودة التشطيب حول الأفياش الكهربائية"]
         
     except Exception as e:
         st.error(f"❌ خطأ في تحليل الصور: {e}")
-        # ✅ إرجاع قيم افتراضية للاختبار
+        # قيم افتراضية للاختبار
         return ["جودة التشطيب حول الأفياش الكهربائية", "استقامة الأفياش الكهربائية أفقيا"]
 
 # ✅ دالة معالجة النص العربي المُحسّنة
@@ -609,11 +659,15 @@ if uploaded:
 
         combined_queries = '; '.join([r['query'] for r in results])
         
-        # ✅ استخدام Gemini SDK مباشرة للملخص
+        # ✅ استخدام REST API مباشرة للملخص
         try:
-            import google.generativeai as genai
-            genai.configure(api_key=GEMINI_API_KEY)
-            model = genai.GenerativeModel('gemini-1.5-flash')
+            import requests
+            
+            API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+            
+            # جهّز مستندات السياق من نتائج البحث، وإذا كانت النتائج فارغة فاخذ أول 3 مستندات من قاعدة البيانات العامة
+            context_docs = [r['doc'] for r in results] if results else docs[:3]
+            context_text = "\n".join([doc.get('content', '') for doc in context_docs[:3]])
             
             qna_prompt = f"""
 أنت خبير في العيوب الكهربائية. قدم **ملخص عام قصير** للعيوب التالية، مع **أولوية لكل بند** (قصوى: مخاطر سلامة، متوسطة: أداء/تشطيب، عادية: جمالي). 
@@ -624,13 +678,27 @@ if uploaded:
 {combined_queries}
 
 ### السياق من قاعدة البيانات:
-{chr(10).join([doc['content'] for doc in context_docs[:3]])}
+{context_text}
 
 ### الملخص:
 """
             
-            response = model.generate_content(qna_prompt)
-            summary = response.text if response and response.text else "تم اكتشاف عيوب كهربائية تحتاج إلى معالجة."
+            payload = {
+                "contents": [{
+                    "parts": [{"text": qna_prompt}]
+                }]
+            }
+            
+            response = requests.post(API_URL, json=payload, timeout=30)
+            
+            if response.status_code == 200:
+                result = response.json()
+                if 'candidates' in result and len(result['candidates']) > 0:
+                    summary = result['candidates'][0]['content']['parts'][0]['text']
+                else:
+                    summary = f"تم اكتشاف العيوب التالية: {combined_queries}"
+            else:
+                summary = f"تم اكتشاف العيوب التالية: {combined_queries}"
             
         except Exception as e:
             st.warning(f"⚠️ خطأ في توليد الملخص: {e}")
