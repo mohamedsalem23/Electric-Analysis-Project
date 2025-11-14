@@ -8,3 +8,4 @@ arabic-reshaper
 sentence-transformers
 numpy
 requests
+google.generativeai
