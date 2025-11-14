@@ -47,7 +47,7 @@ def load_excel() -> pd.DataFrame:
     """قراءة ملف Excel من المسار النسبي"""
     try:
         # ✅ مسار نسبي للـ Deploy
-        excel_path = os.path.join(os.path.dirname(__file__), "data", "جميع_بنود_فحص_الكهرباء.xlsx")
+        excel_path = os.path.join(os.path.dirname(__file__), "data", "Copy of جميع_بنود_فحص_الكهرباء(1).xlsx")
         
         if not os.path.exists(excel_path):
             st.error(f"❌ الملف غير موجود: {excel_path}")
