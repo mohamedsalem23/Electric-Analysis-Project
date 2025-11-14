@@ -314,8 +314,8 @@ def register_fonts():
     """تسجيل خطوط Tahoma من مجلد fonts"""
     try:
         fonts_dir = os.path.join(os.path.dirname(__file__), "fonts")
-        tahoma_path = os.path.join(fonts_dir, "Tahoma.ttf")
-        tahoma_bold_path = os.path.join(fonts_dir, "Tahomabd.ttf")
+        tahoma_path = os.path.join(fonts_dir, "tahoma.ttf")
+        tahoma_bold_path = os.path.join(fonts_dir, "tahomabd.ttf")
         
         if os.path.exists(tahoma_path):
             pdfmetrics.registerFont(TTFont("Tahoma", tahoma_path))
