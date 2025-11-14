@@ -693,7 +693,9 @@ if uploaded:
             
             API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
             
-            context_text = "\n".join([doc['content'] for doc in context_docs[:3]])
+            # تحضير سياق المستندات من نتائج البحث (أو استخدام كامل المستندات كبديل)
+            context_docs = [r['doc'] for r in results] if results else docs
+            context_text = "\n".join([doc.get('content', '') for doc in context_docs[:3]])
             
             qna_prompt = f"""
 أنت خبير في العيوب الكهربائية. قدم **ملخص عام قصير** للعيوب التالية، مع **أولوية لكل بند** (قصوى: مخاطر سلامة، متوسطة: أداء/تشطيب، عادية: جمالي). 
