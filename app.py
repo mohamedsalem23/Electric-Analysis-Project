@@ -209,7 +209,7 @@ def batch_analyze(images_bytes: List[bytes]) -> List[str]:
         import requests
         
         # ✅ استخدام REST API مباشرة بدون SDK
-        API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+        API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
         
         prompt_text = """
 أنت نظام رؤية حاسوبية متخصص. مهمتك هي تحليل الصورة المرفقة وتحديد **جميع أسماء العيوب الرئيسية** اللي تظهر (حتى لو أكثر من واحدة، مثل فراغات + ميلان + بروز). 
