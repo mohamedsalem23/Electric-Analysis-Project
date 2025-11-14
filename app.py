@@ -222,9 +222,17 @@ def batch_analyze(images_bytes: List[bytes]) -> List[str]:
         for img_bytes in images_bytes:
             img = Image.open(io.BytesIO(img_bytes))
             
+            # تحويل إلى RGB لحل خطأ "cannot write mode RGBA as JPEG"
+            if img.mode in ("RGBA", "LA") or (img.mode == "P" and 'transparency' in img.info):
+                img = img.convert("RGB")
+            else:
+                # ضمناً نحول أي وضع غير RGB إلى RGB قبل الحفظ كـ JPEG
+                if img.mode != "RGB":
+                    img = img.convert("RGB")
+            
             # تحويل الصورة إلى base64
             buffered = io.BytesIO()
-            img.save(buffered, format="JPEG")
+            img.save(buffered, format="JPEG", quality=85)
             img_base64 = base64.b64encode(buffered.getvalue()).decode()
             
             # إعداد الطلب
